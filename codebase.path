@@ -1,0 +1,170 @@
+diff --git a/solution/main.tf b/solution/main.tf
+new file mode 100644
+index 0000000..695e028
+--- /dev/null
++++ b/solution/main.tf
+@@ -0,0 +1,23 @@
++provider "aws" {
++  region = local.region
++
++  access_key                  = "test"
++  secret_key                  = "test"
++  skip_credentials_validation = true
++  skip_metadata_api_check     = true
++  skip_requesting_account_id  = true
++}
++
++locals {
++  name   = "client-server-communication"
++  region = "us-east-1"
++
++  cluster_vpc_cidr = "10.0.0.0/16"
++  client_vpc_cidr  = "10.1.0.0/16"
++  azs              = ["us-east-1a", "us-east-1b"]
++
++  tags = {
++    Blueprint  = local.name
++    GithubRepo = "github.com/aws-ia/terraform-aws-eks-blueprints"
++  }
++}
+diff --git a/solution/networking.tf b/solution/networking.tf
+new file mode 100644
+index 0000000..da987c8
+--- /dev/null
++++ b/solution/networking.tf
+@@ -0,0 +1,99 @@
++################################################################################
++# Cluster VPC
++################################################################################
++
++resource "aws_vpc" "cluster" {
++  cidr_block           = local.cluster_vpc_cidr
++  enable_dns_hostnames = true
++  enable_dns_support   = true
++
++  tags = merge(local.tags, { Name = "${local.name}-cluster" })
++}
++
++resource "aws_subnet" "cluster_private" {
++  count             = length(local.azs)
++  vpc_id            = aws_vpc.cluster.id
++  cidr_block        = cidrsubnet(local.cluster_vpc_cidr, 4, count.index)
++  availability_zone = local.azs[count.index]
++
++  tags = merge(local.tags, { Name = "${local.name}-cluster-private-${count.index}" })
++}
++
++resource "aws_subnet" "cluster_public" {
++  count             = length(local.azs)
++  vpc_id            = aws_vpc.cluster.id
++  cidr_block        = cidrsubnet(local.cluster_vpc_cidr, 8, count.index + 48)
++  availability_zone = local.azs[count.index]
++
++  tags = merge(local.tags, {
++    Name                     = "${local.name}-cluster-public-${count.index}"
++    "kubernetes.io/role/elb" = "1"
++  })
++}
++
++################################################################################
++# Client VPC
++################################################################################
++
++resource "aws_vpc" "client" {
++  cidr_block           = local.client_vpc_cidr
++  enable_dns_hostnames = true
++  enable_dns_support   = true
++
++  tags = merge(local.tags, { Name = "${local.name}-client" })
++}
++
++resource "aws_subnet" "client_private" {
++  count             = length(local.azs)
++  vpc_id            = aws_vpc.client.id
++  cidr_block        = cidrsubnet(local.client_vpc_cidr, 4, count.index)
++  availability_zone = local.azs[count.index]
++
++  tags = merge(local.tags, { Name = "${local.name}-client-private-${count.index}" })
++}
++
++################################################################################
++# Security group: VPC Lattice ingress for cluster nodes
++################################################################################
++
++resource "aws_security_group" "cluster_lattice_ingress" {
++  name        = "${local.name}-cluster-lattice-ingress"
++  description = "Allow VPC Lattice ingress to cluster nodes"
++  vpc_id      = aws_vpc.cluster.id
++
++  tags = local.tags
++}
++
++# VPC Lattice link-local CIDR: 169.254.171.0/24
++resource "aws_vpc_security_group_ingress_rule" "cluster_lattice" {
++  security_group_id = aws_security_group.cluster_lattice_ingress.id
++  cidr_ipv4         = "169.254.171.0/24"
++  ip_protocol       = "-1"
++  description       = "Allow all traffic from VPC Lattice link-local CIDR"
++}
++
++resource "aws_vpc_security_group_egress_rule" "cluster_lattice" {
++  security_group_id = aws_security_group.cluster_lattice_ingress.id
++  cidr_ipv4         = "0.0.0.0/0"
++  ip_protocol       = "-1"
++  description       = "Allow all egress"
++}
++
++################################################################################
++# Security group: client egress
++################################################################################
++
++resource "aws_security_group" "client" {
++  name        = "${local.name}-client"
++  description = "Security Group for EC2 client instance egress"
++  vpc_id      = aws_vpc.client.id
++
++  tags = local.tags
++}
++
++resource "aws_vpc_security_group_egress_rule" "client" {
++  security_group_id = aws_security_group.client.id
++  cidr_ipv4         = "0.0.0.0/0"
++  ip_protocol       = "-1"
++  description       = "Allow all egress"
++}
+diff --git a/solution/outputs.tf b/solution/outputs.tf
+new file mode 100644
+index 0000000..ecd85a3
+--- /dev/null
++++ b/solution/outputs.tf
+@@ -0,0 +1,14 @@
++output "cluster_vpc_id" {
++  description = "Cluster VPC ID"
++  value       = aws_vpc.cluster.id
++}
++
++output "client_vpc_id" {
++  description = "Client VPC ID"
++  value       = aws_vpc.client.id
++}
++
++output "cluster_lattice_sg_id" {
++  description = "Security group ID for VPC Lattice ingress on cluster"
++  value       = aws_security_group.cluster_lattice_ingress.id
++}
+diff --git a/solution/versions.tf b/solution/versions.tf
+new file mode 100644
+index 0000000..c25dace
+--- /dev/null
++++ b/solution/versions.tf
+@@ -0,0 +1,10 @@
++terraform {
++  required_version = ">= 1.3"
++
++  required_providers {
++    aws = {
++      source  = "hashicorp/aws"
++      version = ">= 5.34, < 6.0"
++    }
++  }
++}
