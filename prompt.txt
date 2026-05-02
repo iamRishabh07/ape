@@ -1,0 +1,53 @@
+# Task: Add Route53 Private Hosted Zone for VPC Lattice Service Discovery
+
+## Context
+
+This Terraform configuration provisions a dual-VPC networking architecture for
+AWS VPC Lattice client-server communication. The architecture includes:
+
+- A **cluster VPC** (`10.0.0.0/16`) — hosts EKS workloads that act as server-side
+  services behind VPC Lattice
+- A **client VPC** (`10.1.0.0/16`) — hosts client workloads that invoke services
+  via VPC Lattice
+
+Both VPCs have private subnets across multiple availability zones and a security
+group in the cluster VPC that permits VPC Lattice link-local traffic
+(`169.254.171.0/24`).
+
+## The Problem
+
+The initial configuration **does not include a Route53 private hosted zone**.
+Without this zone, neither cluster nor client VPC workloads can resolve VPC
+Lattice service DNS names. EKS pods in the cluster VPC cannot discover and
+connect to services registered in VPC Lattice.
+
+## What Needs to Be Fixed
+
+Add a `route53.tf` file that:
+
+1. Creates an `aws_route53_zone` resource named `primary` for the domain
+   `example.com` as a private hosted zone associated with the **client VPC**
+   (inline `vpc` block)
+2. Creates an `aws_route53_zone_association` resource named `cluster` that
+   explicitly associates the private hosted zone with the **cluster VPC**
+
+Additionally, expose the zone ID as a Terraform output (`route53_zone_id`) in
+`outputs.tf`.
+
+## Why This Matters
+
+- Without the client VPC association, client workloads cannot resolve service DNS
+- Without the cluster VPC association, EKS workloads in the cluster VPC cannot
+  resolve VPC Lattice service endpoints — this is the critical gap that prevents
+  service-to-service communication in the cluster VPC
+
+## Acceptance Criteria
+
+After the fix is applied:
+
+1. `terraform apply` succeeds without errors
+2. The Route53 private hosted zone for `example.com` is associated with **both** the
+   client VPC and the cluster VPC
+3. All 18 tests pass (10 unit + 8 integration)
+4. The Route53 zone is deployed to LocalStack and both VPC associations are
+   verifiable via the Route53 API
