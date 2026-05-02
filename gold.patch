@@ -1,0 +1,44 @@
+diff --git a/solution/outputs.tf b/solution/outputs.tf
+index ecd85a3..3811e22 100644
+--- a/solution/outputs.tf
++++ b/solution/outputs.tf
+@@ -12,3 +12,8 @@ output "cluster_lattice_sg_id" {
+   description = "Security group ID for VPC Lattice ingress on cluster"
+   value       = aws_security_group.cluster_lattice_ingress.id
+ }
++
++output "route53_zone_id" {
++  description = "Route53 private hosted zone ID"
++  value       = aws_route53_zone.primary.zone_id
++}
+diff --git a/solution/route53.tf b/solution/route53.tf
+new file mode 100644
+index 0000000..ef525b5
+--- /dev/null
++++ b/solution/route53.tf
+@@ -0,0 +1,25 @@
++################################################################################
++# Route53 private hosted zone for VPC Lattice service discovery
++# Associated with both client VPC (inline) and cluster VPC (explicit resource)
++################################################################################
++
++resource "aws_route53_zone" "primary" {
++  name    = "example.com"
++  comment = "Private hosted zone for VPC Lattice service discovery"
++
++  vpc {
++    vpc_id = aws_vpc.client.id
++  }
++
++  tags = local.tags
++}
++
++################################################################################
++# Associate Route53 zone with cluster VPC so EKS workloads can resolve
++# VPC Lattice service DNS names via the private hosted zone
++################################################################################
++
++resource "aws_route53_zone_association" "cluster" {
++  zone_id = aws_route53_zone.primary.zone_id
++  vpc_id  = aws_vpc.cluster.id
++}
