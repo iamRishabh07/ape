@@ -1,0 +1,100 @@
+diff --git a/solution/tests/__init__.py b/solution/tests/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/solution/tests/integration_tests.py b/solution/tests/integration_tests.py
+new file mode 100644
+index 0000000..4734637
+--- /dev/null
++++ b/solution/tests/integration_tests.py
+@@ -0,0 +1,198 @@
++"""
++Integration tests for VPC Lattice Client-Server Communication infrastructure.
++
++These tests validate deployed infrastructure behavior using boto3 against LocalStack.
++All tests require a successful `terraform apply` before running.
++"""
++
++import os
++import boto3
++import pytest
++
++ENDPOINT_URL = os.environ.get("AWS_ENDPOINT_URL", "http://localhost:4566")
++REGION = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
++
++EXPECTED_CLUSTER_CIDR = "10.0.0.0/16"
++EXPECTED_CLIENT_CIDR = "10.1.0.0/16"
++EXPECTED_ZONE_NAME = "example.com."
++
++
++def ec2_client():
++    return boto3.client(
++        "ec2",
++        endpoint_url=ENDPOINT_URL,
++        region_name=REGION,
++        aws_access_key_id="test",
++        aws_secret_access_key="test",
++    )
++
++
++def route53_client():
++    return boto3.client(
++        "route53",
++        endpoint_url=ENDPOINT_URL,
++        region_name=REGION,
++        aws_access_key_id="test",
++        aws_secret_access_key="test",
++    )
++
++
++def get_vpcs_by_cidr(cidr):
++    ec2 = ec2_client()
++    resp = ec2.describe_vpcs(Filters=[{"Name": "cidr", "Values": [cidr]}])
++    return resp["Vpcs"]
++
++
++def get_subnets_for_vpc(vpc_id):
++    ec2 = ec2_client()
++    resp = ec2.describe_subnets(Filters=[{"Name": "vpc-id", "Values": [vpc_id]}])
++    return resp["Subnets"]
++
++
++def get_route53_zones():
++    r53 = route53_client()
++    resp = r53.list_hosted_zones()
++    return resp["HostedZones"]
++
++
++def get_zone_associations(zone_id):
++    """Return the list of VPC associations for a hosted zone."""
++    r53 = route53_client()
++    resp = r53.get_hosted_zone(Id=zone_id)
++    return resp.get("VPCs", [])
++
++
++# ---------------------------------------------------------------------------
++# VPC infrastructure tests (always pass)
++# ---------------------------------------------------------------------------
++
++class TestVPCInfrastructure:
++    def test_cluster_vpc_exists(self):
++        """Cluster VPC with CIDR 10.0.0.0/16 must exist after deployment."""
++        vpcs = get_vpcs_by_cidr(EXPECTED_CLUSTER_CIDR)
++        assert len(vpcs) >= 1, (
++            f"Expected cluster VPC with CIDR {EXPECTED_CLUSTER_CIDR}, found none"
++        )
++
++    def test_client_vpc_exists(self):
++        """Client VPC with CIDR 10.1.0.0/16 must exist after deployment."""
++        vpcs = get_vpcs_by_cidr(EXPECTED_CLIENT_CIDR)
++        assert len(vpcs) >= 1, (
++            f"Expected client VPC with CIDR {EXPECTED_CLIENT_CIDR}, found none"
++        )
++
++    def test_cluster_vpc_has_subnets(self):
++        """Cluster VPC must have subnets after deployment."""
++        vpcs = get_vpcs_by_cidr(EXPECTED_CLUSTER_CIDR)
++        assert len(vpcs) >= 1, "Cluster VPC not found"
++        vpc_id = vpcs[0]["VpcId"]
++        subnets = get_subnets_for_vpc(vpc_id)
++        assert len(subnets) >= 1, (
++            f"Cluster VPC {vpc_id} must have at least one subnet"
